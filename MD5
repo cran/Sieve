@@ -1,0 +1,15 @@
+f8a2121f81741bfa9d6ce43ace0970aa *DESCRIPTION
+99b529d562e2217170d0625e98542df5 *NAMESPACE
+be576c3aaa9d29258169972b1685a11e *R/RcppExports.R
+49f5425a5b403887181abaf9f9219d34 *R/SieveFittingModels.R
+e4f099346b1eb6cd5c84636ea0fef3df *README.md
+d5667512094683c7ac739c9480b0cc33 *build/partial.rdb
+07be6582cc47d1fb2c62a61973d7fa71 *man/GenSamples.Rd
+593b64b9dcbff2589c32056bae8516a1 *man/Sieve-package.Rd
+684ea3853d7d87baa0d26a088fa78a32 *man/sieve_predict.Rd
+72a4bd744f715042d69da24165121613 *man/sieve_preprocess.Rd
+796be68a72de79115ed0c52f7f64f5dc *man/sieve_solver.Rd
+d1aca4cc4ce00fc0d67a26f38f6cbdd9 *src/C_Functions.cpp
+61059660eb073d93e00e8ee054237071 *src/Makevars
+61059660eb073d93e00e8ee054237071 *src/Makevars.win
+0532817783fb8f7c55c97f115281f69e *src/RcppExports.cpp
