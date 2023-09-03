@@ -168,12 +168,21 @@ sieve_solver <- function(model, Y, l1 = TRUE, family = "gaussian",
   }
 }
 
-
+#' Create the index matrix for multivariate regression
+#'
+#' @param xdim a number. It specifies the predictors' dimension.
+#' @param basisN a number. The number of basis function to use.
+#' @param maxj a number. We use this to specify the largest row product in the index list.
+#' @param interaction_order a number The maximum order of interaction. 1 means additive model, 2 means including pairwise interaction terms, etc.
+#'
+#' @return a matrix. The first column is the product of the indices, the rest columns are the index vectors for constructing multivariate basis functions.
+#' @export
+#'
 create_index_matrix <- function(xdim, basisN = NULL, maxj = NULL, interaction_order = 5){
   #xdim: the dimension of feature x
-  #dimlimit: the working dimension, same as D' in the paper
   #basisN: default is NULL. We use this to specify the total number of rows in the index list.
   #maxj: default is NULL. We use this to specify the largest row product in the index list.
+  #interaction_order: the maximum order of interaction. 1 means additive model, 2 means including pairwise interaction terms, etc.
   
   index_matrix <- matrix(1, nrow = 1, ncol = xdim) #first row is all 1
   interaction_order <- min(interaction_order, xdim) #this determines the maximal number of non-1 elements each row
@@ -247,7 +256,7 @@ create_index_matrix <- function(xdim, basisN = NULL, maxj = NULL, interaction_or
   return(index_matrix)
 }
 
-normalize_X <- function(X, norm_para  = NULL, lower_q = 0.025, upper_q = 0.975){
+normalize_X <- function(X, norm_para  = NULL, lower_q = 0.01, upper_q = 0.99){
   #normalize the support of covariate so that they are between 0,1.
   #
   
@@ -408,6 +417,52 @@ GenSamples <- function(s.size, xdim = 1, x.dis = "uniform",
   
   if(x.dis == 'uniform'){
     x <- matrix(runif(s.size * xdim, min = 0, max = 1), ncol = xdim)
+  }else if(x.dis == 'block_diag'){
+    
+    ###read in the distribution parameters
+    x.mean <- x.para[[1]]
+    x.var <- x.para[[2]] #marginal variance
+    x.cov <- x.para[[3]] #covariance between features in the block
+    x.block.size <- x.para[[4]] #block size
+    x.block.num <- floor(xdim/x.block.size) #block number
+    
+    print(x.block.num)
+    if(xdim != x.block.size * x.block.num){
+      warning('x overall dimension cannot be divided by block size')
+    }
+    
+    #covariance matrix within the block
+    Sigma <- matrix(x.cov, 
+                    nrow = x.block.size, 
+                    ncol = x.block.size)
+    diag(Sigma) <- rep(x.var, x.block.size)
+    
+    #generate covariates
+    x <- matrix(0, nrow = s.size, ncol = x.block.size*x.block.num)
+    for(i in 1:x.block.num){
+      tempx <- mvrnorm(n = s.size, mu = rep(x.mean, x.block.size),
+                       Sigma = Sigma)
+      x[,((i-1)*x.block.size + 1): (i*x.block.size)] <- tempx
+    }
+  }else if(x.dis == 'block_diag_overlap'){
+    ##this is an adversarial example, one redundant feature is associated with two causal features
+    feature_noise <- x.para[[1]]
+    
+    x1 <- rnorm(s.size, mean = 0, sd = 1)
+    x3 <- rnorm(s.size, mean = 0, sd = 1)
+    x2 <- 0.5*x1 + 2*x3 + rnorm(s.size, mean = 0, sd = feature_noise)
+    # Sigma <- matrix(c(x.var, x.cov, 0, 
+    #                   x.cov, x.var, x.cov,
+    #                   0,     x.cov, x.var), ncol = 3)
+    # 
+    # x <- mvrnorm(n = s.size, mu = rep(x.mean, 3),
+    #                  Sigma = Sigma)
+    
+    x <- matrix(0, nrow = s.size, ncol = 3)
+    x[,1] <- x1
+    x[,2] <- x2
+    x[,3] <- x3
+    
   }else if(x.dis == 'dep12'){
     x <- matrix(runif(s.size * xdim, min = 0, max = 1), ncol = xdim)
     tempm <- matrix(0, nrow = s.size, ncol = 2)
@@ -434,10 +489,26 @@ GenSamples <- function(s.size, xdim = 1, x.dis = "uniform",
         frho.para$index_matrix <- index_matrix
         y <- apply(x[,1:D], 1, truef, frho, frho.para) + #only the first D columns of x is relevant
           rnorm(s.size, 0, noise.para)
-        }else{
+      }else if(frho == 'block_diag_sparse_linear'){
+      ##this is a linear truth, used together with x.dis = 'block_diag'. 
+      ##only the first feature in each block is causally accociated with the outcome
+        all_dim <- 1:xdim
+        x.block.size <- x.para[[4]]
+        causal_dim <- all_dim[all_dim %% x.block.size == 1] #identify which features are useful
+        causal_x <- matrix(x[,causal_dim], nrow = s.size)
+        y <- apply(causal_x, 1, truef, 'linear', frho.para) + 
+          rnorm(s.size, 0, noise.para)
+      }else if(frho == 'block_diag_overlap_sparse_linear'){
+        ##this is an adversarial example, one redundant feature is associated with two causal features
+        causal_x <- matrix(x[,c(1,3)], nrow = s.size)
+        y <- apply(causal_x, 1, truef, 'linear', frho.para) + 
+          rnorm(s.size, 0, noise.para)
+      }
+      else{
         y <- apply(x, 1, truef, frho, frho.para) + 
           rnorm(s.size, 0, noise.para)
-        }
+      }
+      
      
     }
   }else if(y.type == 'binary'){
@@ -461,11 +532,22 @@ truef <- function(x, FUN = 'linear', para = NULL){
     for(i in 1:xdim){
       y <- y + x[i]
     }
+  }else if(FUN == 'constant'){
+    y <- 1  
+  }else if(FUN == 'piecewise_constant'){
+    y <- as.numeric(x[1] > 0.5)
+  }else if(FUN == 'piecewise_linear'){
+    y <- as.numeric(x[1] > 0.5) + x[1]
   }else if(FUN == 'additive'){
     D <- para
     for(i in 1:D){
       y <- y + as.numeric(i %% 2 == 1)*(0.5 - abs(x[i]-0.5)) + as.numeric(i %% 2 == 0)*exp(-x[i])
       # y <- y+ (x[i] * x[i])^2 + (x[i] * x[i+1])^3 + sin(3*x[i])*x[i+2] + x[i]^2*sin(x[i+2])
+    }
+  }else if(FUN == 'theoretical_cosine'){
+    decay_rate <- para
+    for(basis_function_index in 1:30){
+      y <- y + basis_function_index^(-decay_rate) * cos((basis_function_index - 1) * pi * x[1])
     }
   }else if(FUN == 'interaction'){
     D <- para
